@@ -1,0 +1,31 @@
+# Claude 가 만든 완성본(정답지). 사용자가 직접 만든 코드와 비교하는 용도라 커밋하지 않는다.
+_reference/
+
+# Claude 작업 지침 (로컬 전용, 저장소에 올리지 않는다)
+CLAUDE.md
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 데이터는 커밋하지 않는다 (run_all.py 가 받아 온다)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# C / C# 빌드 산출물
+c/build/
+*.o
+*.obj
+*.exe
+bin/
+obj/
+.vs/
+
+# 에디터·OS
+.vscode/
+.DS_Store
+Thumbs.db
