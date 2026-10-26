@@ -9,8 +9,8 @@ project(churn C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# 실행 파일 churn 을 src/main.c, src/csv.c 로 생성
-add_executable(churn src/main.c src/csv.c)
+# 실행 파일 churn 을 src/main.c, src/csv.c, src/datetime.c 로 생성
+add_executable(churn src/main.c src/csv.c src/datetime.c)
 
 # 경고를 많이 줘서 실수를 일찍 잡도록 함
 target_compile_options(churn PRIVATE -Wall -Wextra)
