@@ -138,6 +138,51 @@ void transactions_free(TransactionTable *table) {
     table->capacity = 0;
 }
 
+
+/* 거래 주소 두 개를 (고객 번호, 송장) 순서로 비교함 */
+static int compare_by_customer_invoice(const void *a, const void *b) {
+    const Transaction *x = *(const Transaction *const *)a;
+    const Transaction *y = *(const Transaction *const *)b;
+
+    if (x->customer_id < y->customer_id) {
+        return -1;
+    }
+    if (x->customer_id > y->customer_id) {
+        return 1;
+    }
+    return strcmp(x->invoice, y->invoice);
+}
+
+
+const Transaction **transactions_sorted_observation(const TransactionTable *table,
+                                                    long long cutoff, size_t *n_obs) {
+    size_t n = 0;
+    for (size_t i = 0; i < table->count; i++) {
+        if (table->items[i].timestamp < cutoff) {
+            n++;
+        }
+    }
+
+    const Transaction **rows = malloc(n * sizeof(*rows));
+    if (rows == NULL) {
+        *n_obs = n;
+        return NULL;
+    }
+
+    size_t k = 0;
+    for (size_t i = 0; i < table->count; i++) {
+        if (table->items[i].timestamp < cutoff) {
+            rows[k] = &table->items[i];
+            k++;
+        }
+    }
+
+    qsort(rows, n, sizeof(*rows), compare_by_customer_invoice);
+    *n_obs = n;
+    return rows;
+}
+
+
 /* ==================================================================================================== */
 /* [설계 메모] */
 /* ==================================================================================================== */

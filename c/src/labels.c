@@ -12,20 +12,6 @@
 #define NEW_CUSTOMER_DAYS 30
 
 
-/* 거래 주소 두 개를 (고객 번호, 송장) 순서로 비교함 */
-static int compare_by_customer_invoice(const void *a, const void *b) {
-    const Transaction *x = *(const Transaction *const *)a;
-    const Transaction *y = *(const Transaction *const *)b;
-
-
-    if (x->customer_id < y->customer_id) {
-        return -1;
-    }
-    if (x->customer_id > y->customer_id) {
-        return 1;
-    }
-    return strcmp(x->invoice, y->invoice);
-}
 
 
 /* bsearch 용: 고객 번호로 라벨을 찾음 */
@@ -43,41 +29,12 @@ static int compare_customer_id(const void *key, const void *element) {
 }
 
 
-/* 관측창의 거래 주소를 모아 (고객, 송장) 순으로 정렬함 */
-/* 개수는 n_obs 로 돌려줌 */
-static const Transaction **sorted_observation(const TransactionTable *tx, long long cutoff, size_t *n_obs) {
-    size_t n = 0;
-    for (size_t i = 0; i < tx->count; i++) {
-        if (tx->items[i].timestamp < cutoff) {
-            n++;
-        }
-    }
-
-    const Transaction **rows = malloc(n * sizeof(*rows));
-    if (rows == NULL) {
-        return NULL;
-    }
-
-    size_t k = 0;
-    for (size_t i = 0; i < tx->count; i++) {
-        if (tx->items[i].timestamp < cutoff) {
-            rows[k] = &tx->items[i];
-            k++;
-        }
-    }
-
-    qsort(rows, n, sizeof(*rows), compare_by_customer_invoice);
-    *n_obs = n;
-    return rows;
-}
-
-
 int labels_build(const TransactionTable *tx, long long cutoff, long long label_end, LabelTable *table) {
     table->items = NULL;
     table->count = 0;
 
     size_t n_obs = 0;
-    const Transaction **rows = sorted_observation(tx, cutoff, &n_obs);
+    const Transaction **rows = transactions_sorted_observation(tx, cutoff, &n_obs);
     if (rows == NULL) {
         printf("메모리가 부족함: 관측창 거래 %zu건을 정렬하지 못함\n", n_obs);
         return 0;

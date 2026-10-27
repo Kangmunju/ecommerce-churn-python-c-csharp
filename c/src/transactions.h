@@ -52,5 +52,11 @@ int transactions_load(const char *path, TransactionTable *table);
 void transactions_free(TransactionTable * table);
 
 
+/* 관측창(timestamp < cutoff)의 거래 주소를 모아 (고객, 송장) 순으로 정렬해서 돌려줌 */
+/* 개수는 n_obs 로 돌려주고, 메모리가 없으면 NULL */
+/* 다 쓰고 나면 free 로 돌려줘야 함 (거래 자체는 table 이 갖고 있음) */
+const Transaction **transactions_sorted_observation(const TransactionTable *table, long long cutoff, size_t *n_obs);
+
+
 #endif
 
