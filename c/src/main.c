@@ -1,12 +1,14 @@
 /* 이탈 예측 파이프라인 (C 구현) */
-/* 4단계 : 거래를 메모리에 올리기 */
+/* 5단계 : 이탈 라벨 만들기 */
 
-#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+#include "csv.h"
 #include "datetime.h"
+#include "labels.h"
 #include "transactions.h"
 
 /* Windows 에서만 콘솔 출력을 UTF-8 로 바꾸기 위한 헤더 */
@@ -14,7 +16,8 @@
 #include <windows.h>
 #endif
 
-#define DEFAULT_PATH "data/processed/export_for_c/clean_transactions.csv"
+#define TX_PATH "data/processed/export_for_c/clean_transactions.csv"
+#define REF_PATH "data/processed/export_for_c/reference_features.csv"
 
 static int failures = 0;
 
@@ -28,80 +31,80 @@ static void check(const char *name, long long got, long long expected) {
     }
 }
 
-/* 글자 결과가 기대와 같은지 확인하고 출력함 */
-static void check_text(const char *name, const char *got, const char *expected) {
-    if (strcmp(got, expected) == 0) {
-        printf("  OK   %-40s %s\n", name, got);
-    } else {
-        printf("  실패 %-40s 결과=%s 기대=%s\n", name, got, expected);
-        failures++;
-    }
-}
-
-
-
-int main(int argc, char *argv[]) {
+int main(void) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
-    const char *path = DEFAULT_PATH;
-    if (argc > 1) {
-        path = argv[1];
+    TransactionTable tx;
+    if (!transactions_load(TX_PATH, &tx)) {
+        return 1;
     }
 
-    printf("Transaction 한 건의 크기: %zu 바이트\n", sizeof(Transaction));
+    long long cutoff, label_end;
+    dt_parse("2011-06-10 00:00:00", &cutoff);
+    dt_parse("2011-12-10 00:00:00", &label_end);
 
-    TransactionTable table;
+    LabelTable labels;
     clock_t start = clock();
-    if (!transactions_load(path, &table)) {
+    if (!labels_build(&tx, cutoff, label_end, &labels)) {
         return 1;
     }
     double seconds = (double)(clock() - start) / CLOCKS_PER_SEC;
+    printf("CustomerLabel 한 명의 크기: %zu 바이트, 걸린 시간 %.3f초\n",
+           sizeof(CustomerLabel), seconds);
 
-    printf("읽은 거래: %zu건, 확보한 칸: %zu칸\n", table.count, table.capacity);
-    printf("실제 쓰는 메모리: %.1f MB, 확보한 메모리: %.1f MB\n",
-           table.count * sizeof(Transaction) / 1048576.0,
-           table.capacity * sizeof(Transaction) / 1048576.0);
-    printf("걸린 시간: %.2f초\n", seconds);
-
-    /* 모든 거래를 한 번 훑어서 합계를 구함 */
-    long long sum_customer = 0, sum_quantity = 0, sum_timestamp = 0;
-    double revenue = 0.0;
-    for (size_t i = 0; i < table.count; i++) {
-        const Transaction *t = &table.items[i];
-        sum_customer += t->customer_id;
-        sum_quantity += t->quantity;
-        sum_timestamp += t->timestamp;
-        revenue += t->quantity * t->price;
+    long long churn = 0, is_new = 0, orders = 0;
+    for (size_t i = 0; i < labels.count; i++) {
+        churn += labels.items[i].churn;
+        is_new += labels.items[i].is_new;
+        orders += labels.items[i].n_orders_obs;
     }
 
     printf("[시험] 파이썬 값과 비교\n");
-    check("거래 수", (long long)table.count, 776577);
-    check("고객 번호 합계", sum_customer, 11902294299LL);
-    check("수량 합계", sum_quantity, 10498435);
-    check("초 합계 (③의 값과 같아야 함)", sum_timestamp, 1004902583108760LL);
-    check("매출 합계(센트)", (long long)llround(revenue * 100), 1706803087LL);
+    check("대상 고객", (long long)labels.count, 4944);
+    check("이탈 고객", churn, 2372);
+    check("신규 고객", is_new, 105);
+    check("주문 수 합계(frequency 합)", orders, 26033);
 
-    const Transaction *first = &table.items[0];
-    const Transaction *last = &table.items[table.count - 1];
-    char when[32];
+    /* reference_features.csv 와 고객별로 비교 */
+    FILE *fp = fopen(REF_PATH, "r");
+    if (fp == NULL) {
+        printf("파일을 열 수 없음: %s\n", REF_PATH);
+        return 1;
+    }
+    char line[2048];
+    char *f[CSV_MAX_FIELDS];
+    csv_read_line(fp, line, sizeof(line));
 
-    dt_format(first->timestamp, when, sizeof(when));
-    check("첫 행 고객", first->customer_id, 13085);
-    check_text("첫 행 송장", first->invoice, "489434");
-    check_text("첫 행 상품", first->stock_code, "85048");
-    check_text("첫 행 일시", when, "2009-12-01 07:45:00");
-    check_text("첫 행 국가", first->country, "United Kingdom");
+    size_t row = 0;
+    long long mismatch = 0;
+    while (csv_read_line(fp, line, sizeof(line)) == 1) {
+        int n = csv_split(line, f, CSV_MAX_FIELDS);
+        int id = atoi(f[0]);
+        int ref_freq = (int)atof(f[2]);
+        int ref_churn = atoi(f[n - 2]);
+        int ref_new = atoi(f[n - 1]);
 
-    dt_format(last->timestamp, when, sizeof(when));
-    check("마지막 행 고객", last->customer_id, 12680);
-    check_text("마지막 행 송장", last->invoice, "581587");
-    check_text("마지막 행 일시", when, "2011-12-09 12:50:00");
-    check_text("마지막 행 국가", last->country, "France");
+        if (row >= labels.count || labels.items[row].customer_id != id ||
+            labels.items[row].churn != ref_churn ||
+            labels.items[row].is_new != ref_new ||
+            labels.items[row].n_orders_obs != ref_freq) {
+            mismatch++;
+        }
+        row++;
+    }
+    fclose(fp);
+    check("정답 CSV 행 수", (long long)row, 4944);
+    check("고객별 불일치(번호·이탈·신규·주문수)", mismatch, 0);
 
-    transactions_free(&table);
-    check("메모리를 돌려준 뒤 칸 수", (long long)table.capacity, 0);
+    char first[32], last[32];
+    dt_format(labels.items[0].first_purchase, first, sizeof(first));
+    dt_format(labels.items[0].last_purchase, last, sizeof(last));
+    printf("첫 고객 %d: %s ~ %s\n", labels.items[0].customer_id, first, last);
+
+    labels_free(&labels);
+    transactions_free(&tx);
 
     if (failures == 0) {
         printf("\n모든 시험 통과\n");
