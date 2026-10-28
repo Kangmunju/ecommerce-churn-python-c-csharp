@@ -11,6 +11,8 @@ from pathlib import Path
 
 
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 
 EXPORT = Path("data/processed/export_for_c")
@@ -74,8 +76,35 @@ def returns() -> None:
     show("마지막 행", df.astype(str).iloc[-1].tolist())
 
 
+def logistic() -> None:
+    """로지스틱 회귀: 학습 고객으로 끝까지 수렴시킨 계수와 절편."""
+
+    ref = pd.read_csv(EXPORT / "reference_features.csv")
+    split = pd.read_csv(EXPORT / "reference_split.csv")
+    names = pd.read_csv(EXPORT / "reference_coefficients.csv")["feature"]
+    train = ref.merge(split, on="customer_id")
+    train = train[train["split"] == "train"]
+
+    z = StandardScaler().fit_transform(train[names])
+
+    # 정답 CSV는 sklearn 기본 허용 오차(1e-4)에서 멈춘 값이라 끝까지 수렴시킨 값을 따로 구함
+    model = LogisticRegression(tol=1e-12, max_iter=100000).fit(z, train["churn"])
+
+    print("[로지스틱 회귀 (tol=1e-12)]")
+    show("학습 고객", len(train))
+    show("반복 횟수", int(model.n_iter_[0]))
+    show("절편", f"{model.intercept_[0]:.10f}")
+    for name, coef in zip(names, model.coef_[0]):
+        show(name, f"{coef:+.10f}")
+
+
 def main() -> int:
-    for name in ("clean_transactions.csv", "reference_features.csv", "returns.csv"):
+    for name in (
+        "clean_transactions.csv",
+        "reference_features.csv",
+        "reference_split.csv",
+        "returns.csv",
+    ):
         if not (EXPORT / name).exists():
             raise SystemExit(
                 f"{EXPORT / name} 가 없습니다. 먼저 python tools/export_for_c.py 를 실행하세요."
@@ -85,6 +114,8 @@ def main() -> int:
     labels()
     print()
     returns()
+    print()
+    logistic()
     return 0
 
 
