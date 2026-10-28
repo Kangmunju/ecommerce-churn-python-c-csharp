@@ -28,6 +28,7 @@ from sklearn.preprocessing import StandardScaler
 EXPORT = Path("data/processed/export_for_c")
 EPOCH = pd.Timestamp("1970-01-01")
 CUTOFF = pd.Timestamp("2011-06-10")  # 관측창은 이 시간 '미만'으로 설정함
+LABEL_END = pd.Timestamp("2011-12-10")  # 예측창은 이 시간 '미만'까지로 설정함
 
 
 def to_seconds(text: pd.Series) -> pd.Series:
@@ -135,6 +136,62 @@ def metrics() -> None:
     show("PR-AUC", f"{average_precision_score(y, flat):.12f}")
 
 
+def profit() -> None:
+    """기대이익: 유지 고객의 예측창 매출 중앙값과 임계값별 이익 곡선."""
+
+    # 가정 (analysis/a5_profit.py 와 같은 값)
+    margin, coupon_cost, response = 0.30, 5.00, 0.10
+
+    df = pd.read_csv(
+        EXPORT / "clean_transactions.csv", dtype={"invoice": str, "stock_code": str}
+    )
+    df["invoice_date"] = pd.to_datetime(df["invoice_date"])
+    df["revenue"] = df["quantity"] * df["price"]
+    window = df[(df["invoice_date"] >= CUTOFF) & (df["invoice_date"] < LABEL_END)]
+    observed = df[df["invoice_date"] < CUTOFF]["customer_id"].unique()
+    revenue = (
+        window[window["customer_id"].isin(observed)]
+        .groupby("customer_id")["revenue"]
+        .sum()
+    )
+
+    value_tp = response * revenue.median() * margin - coupon_cost
+    value_fp = -coupon_cost
+
+    print("[유지 고객의 예측창 매출]")
+    show("고객 수", len(revenue))
+    show("중앙값", f"{revenue.median():.10f}")
+    show("평균", f"{revenue.mean():.10f}")
+    show("맞게 보낸 1건의 이익", f"{value_tp:.10f}")
+    show("헛되이 보낸 1건의 손실", f"{value_fp:.10f}")
+
+    test = pd.read_csv(EXPORT / "reference_test_pred.csv")
+    y, prob = test["y"], test["p_logit"]
+
+    print("[임계값별 이익 (reference_test_pred.csv)]")
+    best_threshold, best_profit = 0.0, None
+    total_sent, total_profit = 0, 0.0
+    for k in range(5, 100, 5):
+        threshold = k / 100.0
+        sent = prob >= threshold
+        tp = int((sent & (y == 1)).sum())
+        fp = int((sent & (y == 0)).sum())
+        value = tp * value_tp + fp * value_fp
+        total_sent += tp + fp
+        total_profit += value
+        if best_profit is None or value > best_profit:
+            best_threshold, best_profit = threshold, value
+        if k in (30, 50):
+            show(
+                f"임계값 {threshold:.2f}",
+                f"발송 {tp + fp}, TP {tp}, FP {fp}, 이익 {value:.6f}",
+            )
+    show("최적 임계값", f"{best_threshold:.2f}")
+    show("최대 이익", f"{best_profit:.6f}")
+    show("19개 발송 수 합계", total_sent)
+    show("19개 이익 합계", f"{total_profit:.6f}")
+
+
 def main() -> int:
     for name in (
         "clean_transactions.csv",
@@ -156,6 +213,8 @@ def main() -> int:
     logistic()
     print()
     metrics()
+    print()
+    profit()
     return 0
 
 
