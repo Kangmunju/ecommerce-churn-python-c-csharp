@@ -12,6 +12,16 @@ from pathlib import Path
 
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    brier_score_loss,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.preprocessing import StandardScaler
 
 
@@ -98,11 +108,39 @@ def logistic() -> None:
         show(name, f"{coef:+.10f}")
 
 
+def metrics() -> None:
+    """평가 지표: 정답 CSV 의 시험 고객 확률(p_logit)로 지표 7개와 혼동행렬을 구한다."""
+
+    df = pd.read_csv(EXPORT / "reference_test_pred.csv")
+    y = df["y"]
+    prob = df["p_logit"]
+    pred = (prob >= 0.5).astype(int)
+    cm = confusion_matrix(y, pred)
+
+    print("[reference_test_pred.csv, 임계값 0.5]")
+    show("고객 수", len(df))
+    show("AUC", f"{roc_auc_score(y, prob):.12f}")
+    show("PR-AUC", f"{average_precision_score(y, prob):.12f}")
+    show("정확도", f"{accuracy_score(y, pred):.12f}")
+    show("정밀도", f"{precision_score(y, pred, zero_division=0):.12f}")
+    show("재현율", f"{recall_score(y, pred, zero_division=0):.12f}")
+    show("F1", f"{f1_score(y, pred, zero_division=0):.12f}")
+    show("Brier", f"{brier_score_loss(y, prob):.12f}")
+    show("TN FP FN TP", f"{cm[0, 0]} {cm[0, 1]} {cm[1, 0]} {cm[1, 1]}")
+
+    # 확률이 전부 같을 때(동점)도 C 와 같은 값이 나오는지 확인하는 시험용 기대값
+    flat = pd.Series([0.5] * len(df))
+    print("[확률을 전부 0.5 로 둔 경우]")
+    show("AUC", f"{roc_auc_score(y, flat):.12f}")
+    show("PR-AUC", f"{average_precision_score(y, flat):.12f}")
+
+
 def main() -> int:
     for name in (
         "clean_transactions.csv",
         "reference_features.csv",
         "reference_split.csv",
+        "reference_test_pred.csv",
         "returns.csv",
     ):
         if not (EXPORT / name).exists():
@@ -116,6 +154,8 @@ def main() -> int:
     returns()
     print()
     logistic()
+    print()
+    metrics()
     return 0
 
 
