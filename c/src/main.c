@@ -1,5 +1,5 @@
 /* 이탈 예측 파이프라인 (C 구현) */
-/* 8 단계 : 평가 지표 */
+/* 9 단계 : 기대이익 */
 
 #include <math.h>
 #include <stdio.h>
@@ -12,7 +12,7 @@
 #include "features.h"
 #include "labels.h"
 #include "logistic.h"
-#include "metrics.h"
+#include "profit.h"
 #include "returns.h"
 #include "transactions.h"
 
@@ -24,22 +24,27 @@
 
 #define EXPORT_DIR "data/processed/export_for_c/"
 
-/* 같은 확률로 계산한 값끼리 비교하므로 매우 엄격하게 봄 (상대 오차) */
-#define METRIC_TOLERANCE 1e-9
-/* C 가 직접 학습한 모델의 확률은 정답과 최대 8e-3 달라서 지표도 이 정도는 달라질 수 있음 */
-#define MODEL_TOLERANCE 2e-3
+/* 같은 확률과 같은 데이터로 계산한 값끼리 비교하므로 엄격하게 봄 (상대 오차) */
+#define PROFIT_TOLERANCE 1e-9
 
-/* tools/expected_values.py 의 [reference_test_pred.csv, 임계값 0.5] 출력 */
-#define EXPECTED_AUC 0.781833993130
-#define EXPECTED_PR_AUC 0.750203587894
-#define EXPECTED_ACCURACY 0.712938005391
-#define EXPECTED_PRECISION 0.684278350515
-#define EXPECTED_RECALL 0.745786516854
-#define EXPECTED_F1 0.713709677419
-#define EXPECTED_BRIER 0.190716936782
-/* 확률을 전부 0.5 로 둔 경우 */
-#define EXPECTED_FLAT_AUC 0.500000000000
-#define EXPECTED_FLAT_PR_AUC 0.479784366577
+/* 가정 : 공헌이익률, 쿠폰 1장 원가(파운드), 이탈 예정 고객이 쿠폰을 받고 돌아올 확률 */
+/* 파이썬 analysis/a5_profit.py 의 MARGIN, COUPON_COST, RESPONSE 와 같은 값 */
+#define MARGIN 0.30
+#define COUPON_COST 5.00
+#define RESPONSE 0.10
+
+/* tools/expected_values.py 의 [유지 고객의 예측창 매출] 출력 */
+#define EXPECTED_RETAINED_COUNT 2572
+#define EXPECTED_RETAINED_MEDIAN 635.0100000000
+#define EXPECTED_RETAINED_MEAN 1758.2904315708
+#define EXPECTED_VALUE_TP 14.0503000000
+#define EXPECTED_VALUE_FP -5.0000000000
+
+/* tools/expected_values.py 의 [임계값별 이익 (reference_test_pred.csv)] 출력 */
+#define EXPECTED_BEST_THRESHOLD 0.30
+#define EXPECTED_BEST_PROFIT 6969.342900
+#define EXPECTED_SUM_SENT 13380
+#define EXPECTED_SUM_PROFIT 91884.250500
 
 
 /* reference_split.csv 를 읽어 학습, 시험 고객의 위치를 채움 */
@@ -104,25 +109,38 @@ static const CustomerFeatures *find_customer(const FeatureTable *features, int c
 static int check_value(const char *name, double actual, double expected, double tolerance) {
     double error = fabs(actual - expected) / fmax(1.0, fabs(expected));
     if (error <= tolerance) {
-        printf("  OK   %-10s %.6f (오차 %.2e)\n", name, actual, error);
+        printf("  OK   %-14s %.6f (오차 %.2e)\n", name, actual, error);
         return 0;
     }
-    printf("  실패 %-10s %.6f, 기대 %.6f (오차 %.2e)\n", name, actual, expected, error);
+    printf("  실패 %-14s %.6f, 기대 %.6f (오차 %.2e)\n", name, actual, expected, error);
     return 1;
 }
 
 
-/* 혼동행렬이 기대하는 개수와 같은지 확인함 */
+/* 개수가 기대하는 값과 정확히 같은지 확인함 */
 /* 돌려주는 값: 실패 1, 통과 0 */
-static int check_confusion(const ConfusionMatrix *cm, long long tn, long long fp, long long fn,
-                           long long tp) {
-    if (cm->tn == tn && cm->fp == fp && cm->fn == fn && cm->tp == tp) {
-        printf("  OK   혼동행렬     TN %lld, FP %lld, FN %lld, TP %lld\n", cm->tn, cm->fp, cm->fn, cm->tp);
+static int check_count(const char *name, long long actual, long long expected) {
+    if (actual == expected) {
+        printf("  OK   %-14s %lld\n", name, actual);
         return 0;
     }
-    printf("  실패 혼동행렬     TN %lld, FP %lld, FN %lld, TP %lld (기대 %lld %lld %lld %lld)\n",
-           cm->tn, cm->fp, cm->fn, cm->tp, tn, fp, fn, tp);
+    printf("  실패 %-14s %lld, 기대 %lld\n", name, actual, expected);
     return 1;
+}
+
+
+/* 이익 곡선을 표로 출력함 */
+static void print_curve(const ProfitPoint curve[PROFIT_THRESHOLDS]) {
+    int best = profit_best_index(curve);
+    printf("  임계값   발송    TP    FP  정밀도      기대이익\n");
+    for (int k = 0; k < PROFIT_THRESHOLDS; k++) {
+        const char *mark = "";
+        if (k == best) {
+            mark = "  <- 최대";
+        }
+        printf("   %.2f  %5lld %5lld %5lld   %.2f  %10.2f%s\n", curve[k].threshold, curve[k].sent,
+               curve[k].tp, curve[k].fp, curve[k].precision, curve[k].profit, mark);
+    }
 }
 
 
@@ -172,8 +190,7 @@ int main(void) {
     int *y = malloc(n_test * sizeof(int));
     double *ref_prob = malloc(n_test * sizeof(double));
     double *my_prob = malloc(n_test * sizeof(double));
-    double *flat_prob = malloc(n_test * sizeof(double));
-    if (y == NULL || ref_prob == NULL || my_prob == NULL || flat_prob == NULL) {
+    if (y == NULL || ref_prob == NULL || my_prob == NULL) {
         printf("메모리 할당 실패\n");
         return 1;
     }
@@ -196,7 +213,6 @@ int main(void) {
         y[rows] = atoi(f[1]);
         ref_prob[rows] = atof(f[2]);
         my_prob[rows] = logistic_predict(&model, c);
-        flat_prob[rows] = 0.5;
         rows++;
     }
     fclose(fp);
@@ -207,48 +223,55 @@ int main(void) {
     printf("시험 고객 %zu명\n\n", rows);
 
     int failures = 0;
-    Metrics m;
 
-    /* 1. 파이썬이 계산한 확률로 지표를 구해 sklearn 값과 비교 (지표 계산 코드만 시험함) */
-    printf("[시험] 정답 확률로 지표 계산 (임계값 0.5, 허용 오차 %.0e)\n", METRIC_TOLERANCE);
-    if (!metrics_evaluate(y, ref_prob, n_test, 0.5, &m)) {
+    /* 1. 유지 고객의 예측창 매출 실측 */
+    printf("[시험] 유지 고객의 예측창 매출 (허용 오차 %.0e)\n", PROFIT_TOLERANCE);
+    RetainedRevenue retained;
+    if (!profit_measure_retained(&tx, &labels, cutoff, label_end, &retained)) {
         return 1;
     }
-    failures += check_value("AUC", m.auc, EXPECTED_AUC, METRIC_TOLERANCE);
-    failures += check_value("PR-AUC", m.pr_auc, EXPECTED_PR_AUC, METRIC_TOLERANCE);
-    failures += check_value("accuracy", m.accuracy, EXPECTED_ACCURACY, METRIC_TOLERANCE);
-    failures += check_value("precision", m.precision, EXPECTED_PRECISION, METRIC_TOLERANCE);
-    failures += check_value("recall", m.recall, EXPECTED_RECALL, METRIC_TOLERANCE);
-    failures += check_value("F1", m.f1, EXPECTED_F1, METRIC_TOLERANCE);
-    failures += check_value("Brier", m.brier, EXPECTED_BRIER, METRIC_TOLERANCE);
-    failures += check_confusion(&m.cm, 527, 245, 181, 531);
+    failures += check_count("count", (long long)retained.count, EXPECTED_RETAINED_COUNT);
+    failures += check_value("median", retained.median, EXPECTED_RETAINED_MEDIAN, PROFIT_TOLERANCE);
+    failures += check_value("mean", retained.mean, EXPECTED_RETAINED_MEAN, PROFIT_TOLERANCE);
 
-    /* 2. 확률이 전부 같은 경우 (동점 처리) */
-    printf("[시험] 확률이 전부 0.5 인 경우\n");
-    if (!metrics_evaluate(y, flat_prob, n_test, 0.5, &m)) {
-        return 1;
-    }
-    failures += check_value("AUC", m.auc, EXPECTED_FLAT_AUC, METRIC_TOLERANCE);
-    failures += check_value("PR-AUC", m.pr_auc, EXPECTED_FLAT_PR_AUC, METRIC_TOLERANCE);
+    /* 2. 쿠폰 1장의 이익 */
+    printf("[시험] 쿠폰 1장의 이익\n");
+    ProfitAssumptions assumptions = {MARGIN, COUPON_COST, RESPONSE};
+    ProfitValues values = profit_values(&assumptions, retained.median);
+    failures += check_value("value_tp", values.value_tp, EXPECTED_VALUE_TP, PROFIT_TOLERANCE);
+    failures += check_value("value_fp", values.value_fp, EXPECTED_VALUE_FP, PROFIT_TOLERANCE);
 
-    /* 3. C 가 학습한 모델의 확률로 지표를 구해 정답과 비교 */
-    printf("[시험] C 모델의 확률로 지표 계산 (허용 오차 %.0e)\n", MODEL_TOLERANCE);
-    if (!metrics_evaluate(y, my_prob, n_test, 0.5, &m)) {
-        return 1;
+    /* 3. 정답 확률로 이익 곡선을 구해 파이썬 값과 비교 */
+    printf("[시험] 정답 확률로 이익 곡선 (임계값 0.05 ~ 0.95)\n");
+    ProfitPoint curve[PROFIT_THRESHOLDS];
+    profit_curve(y, ref_prob, n_test, &values, curve);
+    print_curve(curve);
+
+    int best = profit_best_index(curve);
+    long long sum_sent = 0;
+    double sum_profit = 0.0;
+    for (int k = 0; k < PROFIT_THRESHOLDS; k++) {
+        sum_sent += curve[k].sent;
+        sum_profit += curve[k].profit;
     }
-    failures += check_value("AUC", m.auc, EXPECTED_AUC, MODEL_TOLERANCE);
-    failures += check_value("PR-AUC", m.pr_auc, EXPECTED_PR_AUC, MODEL_TOLERANCE);
-    failures += check_value("accuracy", m.accuracy, EXPECTED_ACCURACY, MODEL_TOLERANCE);
-    failures += check_value("precision", m.precision, EXPECTED_PRECISION, MODEL_TOLERANCE);
-    failures += check_value("recall", m.recall, EXPECTED_RECALL, MODEL_TOLERANCE);
-    failures += check_value("F1", m.f1, EXPECTED_F1, MODEL_TOLERANCE);
-    failures += check_value("Brier", m.brier, EXPECTED_BRIER, MODEL_TOLERANCE);
-    printf("  혼동행렬 TN %lld, FP %lld, FN %lld, TP %lld\n", m.cm.tn, m.cm.fp, m.cm.fn, m.cm.tp);
+    failures += check_value("best_thr", curve[best].threshold, EXPECTED_BEST_THRESHOLD, PROFIT_TOLERANCE);
+    failures += check_value("best_profit", curve[best].profit, EXPECTED_BEST_PROFIT, PROFIT_TOLERANCE);
+    failures += check_count("sent@0.30", curve[5].sent, 1056);
+    failures += check_count("tp@0.30", curve[5].tp, 643);
+    failures += check_count("fp@0.30", curve[5].fp, 413);
+    failures += check_value("profit@0.50", curve[9].profit, 6235.709300, PROFIT_TOLERANCE);
+    failures += check_count("sent@0.50", curve[9].sent, 776);
+    failures += check_count("sum_sent", sum_sent, EXPECTED_SUM_SENT);
+    failures += check_value("sum_profit", sum_profit, EXPECTED_SUM_PROFIT, PROFIT_TOLERANCE);
+
+    /* 4. C 가 학습한 모델의 확률로 같은 계산 (정답과 조금 다를 수 있음) */
+    printf("[확인] C 모델의 확률로 이익 곡선\n");
+    profit_curve(y, my_prob, n_test, &values, curve);
+    print_curve(curve);
 
     free(y);
     free(ref_prob);
     free(my_prob);
-    free(flat_prob);
     free(train);
     free(test);
     features_free(&features);
