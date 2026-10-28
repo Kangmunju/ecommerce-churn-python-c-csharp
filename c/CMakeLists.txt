@@ -9,7 +9,8 @@ project(churn C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_executable(churn src/main.c src/csv.c src/datetime.c src/transactions.c src/labels.c src/returns.c src/features.c src/logistic.c)
+add_executable(churn src/main.c src/csv.c src/datetime.c src/transactions.c src/labels.c src/returns.c src/features.c src/logistic.c src/metrics.c)
+
 
 # 경고를 많이 줘서 실수를 일찍 잡도록 함
 target_compile_options(churn PRIVATE -Wall -Wextra)
