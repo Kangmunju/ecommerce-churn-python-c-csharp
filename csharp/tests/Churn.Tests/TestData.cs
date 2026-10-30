@@ -15,6 +15,8 @@ public static class TestData
 
     public static readonly string Returns = Path.Combine(ExportDir, "returns.csv");
 
+    public static readonly string ReferenceFeatures = Path.Combine(ExportDir, "reference_features.csv");
+
     private static string FindRoot()
   {
       // AppContext.BaseDirectory: 실행 중인 시험 프로그램이 있는 폴더
