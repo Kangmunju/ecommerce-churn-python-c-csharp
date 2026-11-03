@@ -1,3 +1,9 @@
+using Churn.Core.Data;
+using Churn.Core.Features;
+using Churn.Core.Labels;
+using Churn.Core.Models;
+
+
 namespace Churn.Tests;
 
 
@@ -16,6 +22,60 @@ public static class TestData
     public static readonly string Returns = Path.Combine(ExportDir, "returns.csv");
 
     public static readonly string ReferenceFeatures = Path.Combine(ExportDir, "reference_features.csv");
+
+    public static readonly string ReferenceSplit = Path.Combine(ExportDir, "reference_split.csv");
+
+    public static readonly string ReferenceCoefficients = Path.Combine(ExportDir, "reference_coefficients.csv");
+
+    public static readonly string ReferenceTestPred = Path.Combine(ExportDir, "reference_test_pred.csv");
+
+    // 실제 데이터로 만든 피처를 파이썬과 같은 학습, 시험으로 나눈 것
+    // Lazy: 처음 쓸 때 한 번만 만들고 이후 시험들이 같은 결과를 사용함
+    // 만드는 데 1 ~ 2초 걸릴 것으로 예상됨
+    private static readonly Lazy<(List<CustomerFeatures>, List<CustomerFeatures>)> SplitData = new(LoadSplit);
+
+    // Item1: 학습 고객, Item2: 시험 고객 (튜플의 첫 번째, 두 번째 값)
+    public static List<CustomerFeatures> Train => SplitData.Value.Item1;
+
+    public static List<CustomerFeatures> Test => SplitData.Value.Item2;
+
+    // 거래, 반품 CSV 읽기 -> 라벨 -> 피처 -> reference_split.csv 로 학습, 시험 나누기
+    private static (List<CustomerFeatures>, List<CustomerFeatures>) LoadSplit()
+  {
+      var cutoff = new DateTime(2011, 6, 10);
+      var transactions = CsvLoader.LoadTransactions(Transactions);
+      var returns = CsvLoader.LoadReturns(Returns);
+      var labels = LabelBuilder.Build(transactions, cutoff, new DateTime(2011, 12, 10));
+      var features = FeatureBuilder.Build(transactions, returns, labels, cutoff);
+
+      // reference_split.csv: customer_id,split (split 은 train 또는 test)
+      var testIds = new HashSet<int>();
+      foreach (var line in File.ReadLines(ReferenceSplit).Skip(1))
+    {
+        var f = line.Split(',');
+        if (f[1] == "test")
+      {
+          testIds.Add(int.Parse(f[0]));
+      }
+    }
+
+    // 시험 고객 번호 목록에 있으면 시험, 없으면 학습으로 나눔
+    // 파이썬은 무작위로 나눴고 C# 은 그 결과를 파일에서 읽어 그대로 씀
+    var train = new List<CustomerFeatures>();
+    var test = new List<CustomerFeatures>();
+    foreach (var c in features)
+    {
+        if (testIds.Contains(c.CustomerId))
+      {
+          test.Add(c);
+      }
+      else
+      {
+          train.Add(c);
+      }
+    }
+    return (train, test);
+  }
 
     private static string FindRoot()
   {
