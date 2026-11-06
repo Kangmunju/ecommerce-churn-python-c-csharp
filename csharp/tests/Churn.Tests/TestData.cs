@@ -2,6 +2,7 @@ using Churn.Core.Data;
 using Churn.Core.Features;
 using Churn.Core.Labels;
 using Churn.Core.Models;
+using System.Globalization;
 
 
 namespace Churn.Tests;
@@ -28,6 +29,21 @@ public static class TestData
     public static readonly string ReferenceCoefficients = Path.Combine(ExportDir, "reference_coefficients.csv");
 
     public static readonly string ReferenceTestPred = Path.Combine(ExportDir, "reference_test_pred.csv");
+
+    // reference_test_pred.csv 의 정답(y)과 확률(p_logit), 파일에 적힌 순서대로
+    // 파일 열 순서: customer_id, y, p_logit (f[0], f[1], f[2])
+    public static (List<bool>, List<double>) ReadReferencePredictions()
+    {
+        var churn = new List<bool>();
+        var probabilities = new List<double>();
+        foreach (var line in File.ReadLines(ReferenceTestPred).Skip(1))
+        {
+            var f = line.Split(',');
+            churn.Add(f[1] == "1");
+            probabilities.Add(double.Parse(f[2], CultureInfo.InvariantCulture));
+        }
+        return (churn, probabilities);
+    }
 
     // 실제 데이터로 만든 피처를 파이썬과 같은 학습, 시험으로 나눈 것
     // Lazy: 처음 쓸 때 한 번만 만들고 이후 시험들이 같은 결과를 사용함
