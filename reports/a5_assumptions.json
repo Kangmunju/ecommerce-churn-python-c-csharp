@@ -1,0 +1,11 @@
+{
+  "MARGIN": 0.3,
+  "COUPON_COST": 5.0,
+  "RESPONSE": 0.1,
+  "MIN_WORTH_test_gbp": 100.0,
+  "R_RETAINED_median_measured": 635.01,
+  "R_RETAINED_mean_measured": 1758.29,
+  "VALUE_TP": 14.05,
+  "VALUE_FP": -5.0,
+  "note": "R_RETAINED 만 실측이고 나머지는 가정. 증분 효과는 관찰 데이터로 알 수 없다."
+}
