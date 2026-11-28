@@ -1,5 +1,7 @@
 # 이커머스 고객 이탈 예측 (E-Commerce Customer Churn Prediction)
 
+🌐 **[대시보드 바로가기](https://ecommerce-churn-python-c-csharp.streamlit.app/)** · 📄 **[한계 기록](LIMITS.md)** · 📄 **[가이드와 달라진 점](DEVIATIONS.md)**
+
 거래 로그 106만 행으로 **"이 고객이 앞으로 6개월 안에 다시 살까"** 를 예측함.
 성능 경쟁이 아니라, 이탈 예측에서 초보가 반드시 빠지는 함정을 실측으로 해체하는 프로젝트임.
 같은 문제를 **Python(기준 구현) → C(초기 모델) → C#(객체지향 확장)** 으로 구현하고, 결과가 서로 맞는지 비교함.
@@ -95,6 +97,17 @@ dotnet test csharp/Churn.sln                           # xUnit 시험 115개
 
 - .NET SDK 9.0 이 필요함. 데이터 파일이 없으면 데이터를 쓰는 시험은 실패하지 않고 건너뜀.
 
+**5. 대시보드 (Streamlit)**
+
+```powershell
+python tools/export_for_app.py                 # app/data/test_pred.csv 생성 (2번을 먼저 실행)
+pip install -r app/requirements.txt
+streamlit run app/streamlit_app.py
+```
+
+- 배포된 화면은 맨 위의 대시보드 링크에서 볼 수 있음. 모델은 다시 학습하지 않고 저장된 CSV 와 소스 코드를 읽어 보여 줌.
+- 기대이익 계산기, 함정 4가지, 세 언어 비교(코드와 일치 확인), 방법과 한계의 4개 탭으로 구성됨.
+
 ## 데이터
 
 UCI Machine Learning Repository — Online Retail II (CC BY 4.0)
@@ -123,6 +136,10 @@ analysis/a5_profit.py              ★★ 기대이익 임계값
 analysis/a6_mlp_pitfalls.py        ★  MLP 함정
 tools/export_for_c.py              C·C# 입력과 파이썬 정답을 CSV 로 내보냄
 tools/expected_values.py           C 시험의 기대값을 계산해 출처를 남김
+tools/export_for_app.py            대시보드가 읽을 시험 고객의 정답과 예측 확률 CSV 를 만듦
+app/streamlit_app.py               Streamlit 대시보드 (기대이익 계산기, 함정, 세 언어 비교, 한계)
+app/data/                          대시보드 전용 작은 CSV (시험 고객 정답·확률, 비교 표)
+.streamlit/config.toml             대시보드 색상 설정
 c/CMakeLists.txt                   C 빌드 설정
 c/src/                             csv, datetime, transactions, returns, labels, features,
                                    logistic, metrics, profit, main (라이브러리 없이 직접 구현)
