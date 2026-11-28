@@ -2,6 +2,11 @@
 
 🌐 **[대시보드 바로가기](https://ecommerce-churn-python-c-csharp.streamlit.app/)** · 📄 **[한계 기록](LIMITS.md)** · 📄 **[가이드와 달라진 점](DEVIATIONS.md)**
 
+<p align="center">
+  <a href="https://ecommerce-churn-python-c-csharp.streamlit.app/"><img src="docs/images/app_overview.png" width="49%" alt="대시보드 프로젝트 개요 탭: 문제 정의 타임라인과 정제 퍼널"></a>
+  <a href="https://ecommerce-churn-python-c-csharp.streamlit.app/"><img src="docs/images/app_calculator.png" width="49%" alt="대시보드 기대이익 계산기 탭: 임계값별 기대이익 곡선"></a>
+</p>
+
 거래 로그 106만 행으로 **"이 고객이 앞으로 6개월 안에 다시 살까"** 를 예측함.
 성능 경쟁이 아니라, 이탈 예측에서 초보가 반드시 빠지는 함정을 실측으로 해체하는 프로젝트임.
 같은 문제를 **Python(기준 구현) → C(초기 모델) → C#(객체지향 확장)** 으로 구현하고, 결과가 서로 맞는지 비교함.
@@ -26,6 +31,8 @@
 **MLP 가 로지스틱을 이겼다고 말하지 않음.** 시드 10개의 MLP AUC 는 0.7836 ± 0.0035 로 로지스틱(0.7818)과의 차이(+0.0018)가 시드 간 흔들림보다 작고, 이긴 시드는 10개 중 6개임.
 
 ## Python · C · C# 결과 비교
+
+<a href="https://ecommerce-churn-python-c-csharp.streamlit.app/"><img src="docs/images/app_languages.png" width="70%" alt="대시보드 세 언어로 구현 탭: 단계별 구현 현황"></a>
 
 세 구현이 같은 시험 고객 1,484명에 낸 결과임. C# 의 `Churn.App` 이 24개 항목을 파이썬과 비교해 모두 허용 오차 안에서 일치함을 확인함.
 
@@ -137,9 +144,10 @@ analysis/a6_mlp_pitfalls.py        ★  MLP 함정
 tools/export_for_c.py              C·C# 입력과 파이썬 정답을 CSV 로 내보냄
 tools/expected_values.py           C 시험의 기대값을 계산해 출처를 남김
 tools/export_for_app.py            대시보드가 읽을 시험 고객의 정답과 예측 확률 CSV 를 만듦
-app/streamlit_app.py               Streamlit 대시보드 (기대이익 계산기, 함정, 세 언어 비교, 한계)
+app/streamlit_app.py               Streamlit 대시보드 (개요, 기대이익 계산기, 함정, 세 언어 비교, 한계)
 app/data/                          대시보드 전용 작은 CSV (시험 고객 정답·확률, 피처와 이탈의 상관, 비교 표)
 .streamlit/config.toml             대시보드 색상 설정
+docs/images/                       README 에 넣은 대시보드 화면 캡처
 c/CMakeLists.txt                   C 빌드 설정
 c/src/                             csv, datetime, transactions, returns, labels, features,
                                    logistic, metrics, profit, main (라이브러리 없이 직접 구현)
