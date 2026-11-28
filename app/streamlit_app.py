@@ -4,12 +4,14 @@
 
 이 앱은 모델을 다시 학습하지 않고, 저장된 CSV 와 소스 코드를 읽어서 보여 준다.
 - 기대이익 계산기는 파이썬이 저장한 시험 고객 1,484명의 정답과 예측 확률(app/data/test_pred.csv)을 쓴다.
+- 피처와 계수 해석은 reports/logit_coefficients.csv 와 app/data/feature_corr.csv 를 쓴다.
 - C 와 C# 은 이 앱 안에서 실행되지 않는다. 저장소에서 실행해 둔 결과(app/data/comparison.csv)와 코드를 보여 준다.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import textwrap
 from pathlib import Path
 
@@ -29,6 +31,13 @@ REPO_URL = "https://github.com/Kangmunju/ecommerce-churn-python-c-csharp"
 # 쿠폰 발송을 '실행' 으로 권하는 최소 기대이익(파운드), 파이프라인(C#)의 기준과 같음
 MIN_WORTH = 100.0
 
+# 원본 거래 수 (reports/DATA_ACCESS.md), 시트가 겹쳐 중복으로 막힌 행 수는 원본과 정제 시작 행 수의 차이로 구함
+RAW_ROWS = 1_067_371
+
+# 관측창과 예측창 (src/labels.py 의 CUTOFF, LABEL_END 와 DEVIATIONS.md 의 556일)
+OBSERVATION_DAYS = 556
+PREDICTION_DAYS = 183
+
 # 색: 정상은 청록, 부풀려진 값은 주황, 일부만 부풀려진 값은 호박색, 중립은 회색
 TEAL = "#0F766E"
 ORANGE = "#EA580C"
@@ -38,6 +47,30 @@ GREEN = "#15803D"
 RED = "#DC2626"
 # 언어마다 정한 색 (첫 화면의 이름표와 세 언어 탭에서 같은 색을 씀)
 LANG_COLOR = {"Python": "#0F766E", "C": "#BE185D", "C#": "#6D28D9"}
+
+# 피처 20개: (묶음, 이름, 의미)  ·  src/features.py 의 정의를 그대로 옮김
+FEATURE_INFO = [
+    ("RFM", "recency", "기준일에서 마지막 주문일을 뺀 일수"),
+    ("RFM", "frequency", "주문 횟수 (송장 기준)"),
+    ("RFM", "monetary", "총 구매액"),
+    ("RFM", "avg_order_value", "주문 금액의 평균"),
+    ("RFM", "std_order_value", "주문 금액의 표준편차"),
+    ("RFM", "max_order_value", "주문 금액의 최댓값"),
+    ("RFM", "total_items", "총 구매 수량"),
+    ("RFM", "tenure", "기준일에서 첫 주문일을 뺀 일수 (고객이 된 지 얼마나 됐는가)"),
+    ("RFM", "active_span", "첫 주문부터 마지막 주문까지의 기간 (일)"),
+    ("주문 리듬", "gap_mean", "주문 간격의 평균 (일) · 1회 구매 고객은 tenure 로 채움"),
+    ("주문 리듬", "gap_std", "주문 간격의 표준편차 · 1회 구매 고객은 0"),
+    ("주문 리듬", "gap_max", "주문 간격의 최댓값 · 1회 구매 고객은 tenure 로 채움"),
+    ("주문 리듬", "recency_ratio", "recency 를 gap_mean 으로 나눈 값 · 그 고객의 평소 리듬보다 얼마나 늦었는가 (상한 50)"),
+    ("최근 90일", "orders_90d", "기준일 직전 90일의 주문 수"),
+    ("최근 90일", "revenue_90d", "기준일 직전 90일의 구매액"),
+    ("최근 90일", "share_90d", "최근 90일 구매액을 총 구매액으로 나눈 값"),
+    ("탐색·반품", "n_products", "구매한 상품 종류 수"),
+    ("탐색·반품", "n_returns", "관측창 안의 반품(취소 전표) 송장 수"),
+    ("탐색·반품", "return_rate", "반품 수를 주문 수로 나눈 값 (상한 1)"),
+    ("국가", "is_uk", "마지막 주문의 국가가 영국이면 1"),
+]
 
 st.set_page_config(page_title="이커머스 고객 이탈 예측 | Python · C · C#", layout="wide")
 
@@ -67,6 +100,12 @@ st.markdown(
     .stat-label { font-size: 0.9rem; opacity: 0.75; }
     .stat-value { font-size: 1.9rem; font-weight: 600; line-height: 1.35; }
     .stat-sub { font-size: 0.85rem; opacity: 0.7; min-height: 1.3rem; }
+    .stat ul { margin: 0.3rem 0 0 0; padding-left: 1.2rem; line-height: 1.7; }
+
+    .timeline { display: flex; width: 100%; border-radius: 10px; overflow: hidden; margin: 0.6rem 0 0.4rem 0; }
+    .timeline .seg { padding: 14px 16px; color: #fff; line-height: 1.5; }
+    .timeline .seg b { font-size: 1.05rem; }
+    .timeline .seg span { font-size: 0.88rem; opacity: 0.92; }
 
     table.grid { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
     table.grid th { text-align: left; font-weight: 600; padding: 10px 12px;
@@ -77,6 +116,7 @@ st.markdown(
            border-left: 4px solid #888; background: rgba(128,128,128,0.10); }
     .tag.none { opacity: 0.55; border-left-style: dashed; }
     .warn { color: #EA580C; font-weight: 600; }
+    table.grid .nw { white-space: nowrap; }
 
     [role="tablist"] { gap: 0; }
     [data-testid="stTab"] { flex: 1 1 0; justify-content: center; padding: 1rem 0.5rem; height: auto; }
@@ -136,6 +176,11 @@ def money(value: float) -> str:
     if value < 0:
         sign = "-"
     return f"{sign}£{abs(value):,.0f}"
+
+
+def signed(value: float, digits: int = 2) -> str:
+    """부호를 항상 붙여 +0.44, -1.47 처럼 적음."""
+    return f"{value:+.{digits}f}"
 
 
 def html(text: str) -> None:
@@ -228,7 +273,199 @@ st.caption(
     "이 앱은 저장된 결과를 읽어 보여 주며 모델은 다시 학습하지 않음"
 )
 
-tab1, tab2, tab3, tab4 = st.tabs(["기대이익 계산기", "함정 4가지", "세 언어로 구현", "방법과 한계"])
+tab0, tab1, tab2, tab3, tab4 = st.tabs(
+    ["프로젝트 개요", "기대이익 계산기", "함정 4가지", "세 언어로 구현", "방법과 한계"]
+)
+
+# ============================================================
+# 탭 0. 프로젝트 개요
+# ============================================================
+with tab0:
+    st.subheader("프로젝트 개요")
+    st.write("영국 온라인 소매업체의 거래 로그로 **관측창의 행동을 보고 예측창에 다시 살지** 예측")
+
+    # ---- 1. 문제 정의 ----
+    st.markdown("#### 1. 문제 정의")
+    html(
+        f"""
+        <div class="timeline">
+          <div class="seg" style="flex:{OBSERVATION_DAYS}; background:{TEAL}">
+            <b>관측창 {OBSERVATION_DAYS}일</b><br><span>2009-12-01 → 2011-06-09 · 피처를 만드는 구간</span>
+          </div>
+          <div class="seg" style="flex:{PREDICTION_DAYS}; background:{ORANGE}">
+            <b>예측창 {PREDICTION_DAYS}일</b><br><span>2011-06-10 → 2011-12-09 · 정답을 정하는 구간</span>
+          </div>
+        </div>
+        """
+    )
+    st.caption("기준일 2011-06-10 · 예측창에 구매가 한 번도 없으면 이탈 · 기준일 이후 데이터는 피처에 한 줄도 쓰지 않음")
+
+    a4_rows = load_csv(str(REPORTS / "a4_survivorship.csv"))
+    customers = int(a4_rows.iloc[0]["고객 수"])
+    churn_rate = float(a4_rows.iloc[0]["이탈률"])
+    churned = round(customers * churn_rate)
+    test_count = len(load_csv(str(DATA / "test_pred.csv")))
+    stat_grid(
+        [
+            stat_card("분석 대상 고객", f"{customers:,}명", "관측창에 1건 이상 구매"),
+            stat_card("이탈 고객", f"{churned:,}명", f"이탈률 {churn_rate * 100:.1f}%"),
+            stat_card("학습 / 시험", f"{customers - test_count:,} / {test_count:,}", "무작위 분할 (7 : 3)"),
+        ]
+    )
+
+    # ---- 2. 데이터 흐름 ----
+    st.markdown("#### 2. 데이터 흐름: 정제 퍼널")
+    clean_log = load_csv(str(REPORTS / "clean_log.csv"))
+    dedup_rows = int(clean_log.iloc[0]["before"])  # 시트가 겹쳐 중복을 막은 뒤의 행 수
+    funnel = [("원본", RAW_ROWS, 0), ("중복 제거", dedup_rows, RAW_ROWS - dedup_rows)]
+    for _, row in clean_log.iterrows():
+        step_name = re.sub(r"^\d+\.\s*", "", str(row["step"]))
+        funnel.append((step_name, int(row["after"]), int(row["dropped"])))
+    funnel_df = pd.DataFrame(funnel, columns=["단계", "행 수", "줄어든 행"])
+    biggest = funnel_df["줄어든 행"].idxmax()  # 가장 많이 줄어든 단계만 주황으로 강조
+    funnel_df = funnel_df.assign(강조=["큰 손실" if i == biggest else "일반" for i in range(len(funnel_df))])
+    funnel_df = funnel_df.assign(라벨=funnel_df["행 수"].map(lambda v: f"{v:,}"))
+
+    base = alt.Chart(funnel_df).encode(y=alt.Y("단계:N", sort=None, title=None, axis=alt.Axis(labelLimit=260)))
+    bars = base.mark_bar(clip=True).encode(
+        x=alt.X("행 수:Q", title="거래 행 수", scale=alt.Scale(domain=[0, 1_350_000]), axis=alt.Axis(format="~s")),
+        color=alt.Color("강조:N", scale=alt.Scale(domain=["일반", "큰 손실"], range=[TEAL, ORANGE]), legend=None),
+        tooltip=["단계", alt.Tooltip("행 수:Q", format=",d"), alt.Tooltip("줄어든 행:Q", format=",d")],
+    )
+    labels = base.mark_text(align="left", dx=6, fontSize=13).encode(x="행 수:Q", text="라벨:N")
+    st.altair_chart(styled(bars + labels, 300), width="stretch")
+    lost = int(funnel_df.loc[biggest, "줄어든 행"])
+    st.caption(
+        f"가장 크게 줄어든 단계 · {funnel_df.loc[biggest, '단계']} −{lost:,}행 (매출 13.1% 포기) · "
+        "이탈은 고객 단위 문제라 고객 번호가 없는 거래는 분석에서 제외"
+    )
+
+    # ---- 3. 핵심 결과 ----
+    st.markdown("#### 3. 핵심 결과")
+    scores = load_csv(str(REPORTS / "model_scores.csv"))
+    cv = load_csv(str(REPORTS / "cv_scores.csv")).set_index("model")
+    logit_auc = float(scores.loc[scores["model"].str.contains("로지스틱"), "AUC"].iloc[0])
+    mlp_auc = float(scores.loc[scores["model"].str.contains("MLP"), "AUC"].iloc[0])
+    stat_grid(
+        [
+            stat_card(
+                "로지스틱 AUC",
+                f"{logit_auc:.4f}",
+                f"5-fold {cv.loc['로지스틱', 'mean']:.4f} ± {cv.loc['로지스틱', 'std']:.4f}",
+            ),
+            stat_card(
+                "MLP AUC", f"{mlp_auc:.4f}", f"5-fold {cv.loc['MLP', 'mean']:.4f} ± {cv.loc['MLP', 'std']:.4f}"
+            ),
+            stat_card("최적 기대이익", "£6,969", "임계값 0.30 · 기본 0.50 은 £6,236"),
+            stat_card("이탈 정의만 바꾸면", "AUC 1.0000", "원래 0.7818 · 함정 1", ORANGE),
+        ]
+    )
+
+    scores = scores.assign(모델=scores["model"].map(lambda v: re.sub(r"^\d+\.\s*", "", str(v)).replace("'", "")))
+    scores = scores.assign(구분=["기준선", "기준선", "모델", "모델"])
+    scores = scores.assign(라벨=scores["AUC"].map(lambda v: f"{v:.4f}"))
+    base = alt.Chart(scores).encode(y=alt.Y("모델:N", sort=None, title=None, axis=alt.Axis(labelLimit=320)))
+    bars = base.mark_bar(clip=True).encode(
+        x=alt.X("AUC:Q", scale=alt.Scale(domain=[0.5, 0.85])),
+        color=alt.Color("구분:N", scale=alt.Scale(domain=["기준선", "모델"], range=[GRAY, TEAL]), legend=None),
+        tooltip=["모델", alt.Tooltip("AUC:Q", format=".4f")],
+    )
+    labels = base.mark_text(align="left", dx=6, fontSize=13).encode(x="AUC:Q", text="라벨:N")
+    st.altair_chart(styled(bars + labels, 210), width="stretch")
+    st.caption("회색 · 기준선(다수 클래스, 규칙 하나)  /  청록 · 모델  /  MLP 는 로지스틱과 구분되지 않음 (시드 10개 평균 0.7836 vs 0.7818)")
+    st.divider()
+
+    # ---- 4. 무엇이 이탈을 만드는가 ----
+    st.markdown("#### 4. 무엇이 이탈과 이어지는가: 피처 20개와 로지스틱 계수")
+    st.write(
+        "피처 20개는 모두 **기준일 이전 거래** 로만 계산 · 로지스틱 회귀의 계수는 "
+        "**표준화한 값 기준(1 표준편차 변할 때의 변화)** 이라 피처끼리 크기를 비교할 수 있음"
+    )
+
+    coef = pd.read_csv(REPORTS / "logit_coefficients.csv", header=0, names=["feature", "coef"])
+    corr = load_csv(str(DATA / "feature_corr.csv")).rename(columns={"corr_with_churn": "corr"})
+    info = pd.DataFrame(FEATURE_INFO, columns=["묶음", "feature", "의미"])
+    table = coef.merge(corr, on="feature").merge(info, on="feature")
+    table = table.assign(
+        방향=table["coef"].map(lambda v: "이탈 쪽" if v > 0 else "유지 쪽"),
+        뒤집힘=[(c > 0) != (r > 0) and abs(r) >= 0.05 for c, r in zip(table["coef"], table["corr"])],
+    )
+
+    chart = (
+        alt.Chart(table)
+        .mark_bar(clip=True)
+        .encode(
+            y=alt.Y("feature:N", sort=alt.EncodingSortField("coef", order="descending"), title=None),
+            x=alt.X("coef:Q", title="로지스틱 계수 (표준화) · 오른쪽일수록 이탈 확률을 높임"),
+            color=alt.Color("방향:N", scale=alt.Scale(domain=["이탈 쪽", "유지 쪽"], range=[ORANGE, TEAL]), legend=None),
+            tooltip=[
+                alt.Tooltip("feature:N", title="피처"),
+                alt.Tooltip("의미:N"),
+                alt.Tooltip("coef:Q", title="계수", format="+.3f"),
+                alt.Tooltip("corr:Q", title="이탈과의 단독 상관", format="+.2f"),
+            ],
+        )
+    )
+    st.altair_chart(styled(chart, 520), width="stretch")
+    st.caption("주황 · 이탈 확률을 높이는 쪽  /  청록 · 이탈 확률을 낮추는 쪽 (남아 있는 쪽)")
+
+    top = table.reindex(table["coef"].abs().sort_values(ascending=False).index).head(3)
+    insight_cards = []
+    for _, row in top.iterrows():
+        direction = "이탈 확률이 높아짐" if row["coef"] > 0 else "이탈 확률이 낮아짐"
+        insight_cards.append(
+            stat_card(
+                row["feature"],
+                signed(row["coef"]),
+                f"{row['의미']} → 값이 클수록 {direction}",
+                ORANGE if row["coef"] > 0 else TEAL,
+            )
+        )
+    st.markdown("**계수가 큰 피처 3개**")
+    stat_grid(insight_cards)
+
+    flipped = table[table["뒤집힘"]]
+    flipped = flipped.reindex(flipped["coef"].abs().sort_values(ascending=False).index)  # 계수가 큰 순서
+    flip_items = "".join(
+        f"<li><b>{r['feature']}</b> · 단독 상관 {signed(r['corr'])} → 계수 {signed(r['coef'])}</li>"
+        for _, r in flipped.head(3).iterrows()
+    )
+    if len(flipped) > 3:
+        flip_items += f"<li>그 밖에 {len(flipped) - 3}개 · 아래 표의 비고 열에서 확인</li>"
+    html(
+        f"""
+        <div class="stat" style="border-left:4px solid {ORANGE}">
+          <div class="stat-label"><b>읽을 때 주의</b></div>
+          <ul>
+            <li><b>상관이지 인과가 아님</b> · 최근 주문이 많은 고객이 남는다는 뜻이지, 주문을 늘리면 이탈이 줄어든다는 뜻이 아님</li>
+            <li><b>피처끼리 겹치면 부호가 뒤집힘</b> · 이탈과의 단독 상관과 계수의 부호가 반대인 피처가 {len(flipped)}개 있음 (계수가 큰 3개만 표시)</li>
+          </ul>
+          <ul style="margin-top:0">{flip_items}</ul>
+          <div class="stat-sub">다른 피처와 함께 넣으면 그 피처만의 몫이 달라지므로, 개별 계수를 독립된 영향으로 읽으면 안 됨</div>
+        </div>
+        """
+    )
+
+    with st.expander("피처 20개 전체 보기 (묶음, 의미, 계수, 단독 상관)"):
+        full = table.reindex(table["coef"].abs().sort_values(ascending=False).index)
+        rows_html = ""
+        for _, r in full.iterrows():
+            note = ""
+            if r["뒤집힘"]:
+                note = '<span class="warn">부호 반대</span>'
+            rows_html += (
+                f'<tr><td class="nw">{r["묶음"]}</td><td class="nw"><b>{r["feature"]}</b></td><td>{r["의미"]}</td>'
+                f'<td class="nw">{signed(r["coef"])}</td><td class="nw">{signed(r["corr"])}</td><td class="nw">{note}</td></tr>'
+            )
+        html(
+            f"""
+            <table class="grid">
+              <tr><th class="nw">묶음</th><th class="nw">피처</th><th>의미</th><th class="nw">계수</th><th class="nw">단독 상관</th><th class="nw">비고</th></tr>
+              {rows_html}
+            </table>
+            """
+        )
+        st.caption("계수 크기순 · 계수는 표준화 기준 · 단독 상관은 피처 하나와 이탈(0/1)의 상관계수 (피어슨)")
 
 # ============================================================
 # 탭 1. 기대이익 계산기

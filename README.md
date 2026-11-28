@@ -100,13 +100,13 @@ dotnet test csharp/Churn.sln                           # xUnit 시험 115개
 **5. 대시보드 (Streamlit)**
 
 ```powershell
-python tools/export_for_app.py                 # app/data/test_pred.csv 생성 (2번을 먼저 실행)
+python tools/export_for_app.py                 # app/data/ 의 CSV 2개 생성 (2번을 먼저 실행)
 pip install -r app/requirements.txt
 streamlit run app/streamlit_app.py
 ```
 
 - 배포된 화면은 맨 위의 대시보드 링크에서 볼 수 있음. 모델은 다시 학습하지 않고 저장된 CSV 와 소스 코드를 읽어 보여 줌.
-- 기대이익 계산기, 함정 4가지, 세 언어 비교(코드와 일치 확인), 방법과 한계의 4개 탭으로 구성됨.
+- 프로젝트 개요(문제 정의, 정제 퍼널, 핵심 결과, 피처 20개와 로지스틱 계수 해석), 기대이익 계산기, 함정 4가지, 세 언어 비교(코드와 일치 확인), 방법과 한계의 5개 탭으로 구성됨.
 
 ## 데이터
 
@@ -138,7 +138,7 @@ tools/export_for_c.py              C·C# 입력과 파이썬 정답을 CSV 로 �
 tools/expected_values.py           C 시험의 기대값을 계산해 출처를 남김
 tools/export_for_app.py            대시보드가 읽을 시험 고객의 정답과 예측 확률 CSV 를 만듦
 app/streamlit_app.py               Streamlit 대시보드 (기대이익 계산기, 함정, 세 언어 비교, 한계)
-app/data/                          대시보드 전용 작은 CSV (시험 고객 정답·확률, 비교 표)
+app/data/                          대시보드 전용 작은 CSV (시험 고객 정답·확률, 피처와 이탈의 상관, 비교 표)
 .streamlit/config.toml             대시보드 색상 설정
 c/CMakeLists.txt                   C 빌드 설정
 c/src/                             csv, datetime, transactions, returns, labels, features,
